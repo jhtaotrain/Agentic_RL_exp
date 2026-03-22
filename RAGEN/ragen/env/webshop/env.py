@@ -173,9 +173,10 @@ class WebShopEnv(BaseLanguageBasedEnv, WebAgentTextEnv):
 
 if __name__ == '__main__':
     env = WebShopEnv()
-    print(env.reset())
+    obs = env.reset(seed=0, mode="train")
+    print(obs)
     while True:
-        print(env.observation)
+        print(env.render())
         print(env.server.user_sessions[env.session]['goal']['asin'])
         print(f"Available actions: {env.get_available_actions()}")
         action = input("Enter action: ")
@@ -183,4 +184,8 @@ if __name__ == '__main__':
             break
         obs, reward, done, info = env.step(action)
         print(obs, reward, done, info)
+        if done:
+            print("Episode finished. Resetting with next seed.")
+            obs = env.reset(seed=1, mode="train")
+            print(obs)
     env.close()

@@ -3,7 +3,7 @@ defaults:
   - envs
 
 system:
-  CUDA_VISIBLE_DEVICES: "0,1"
+  CUDA_VISIBLE_DEVICES: "0"
 
 seed:
   train: 10000
@@ -108,7 +108,7 @@ trainer:
   total_training_steps: 200
   validation_steps: 1 # validation instances = validation_steps * val_env_groups * group_size
   val_before_train: True
-  n_gpus_per_node: 2
+  n_gpus_per_node: 1
   test_freq: 5
   generations_to_log_to_wandb: 
     val: 20

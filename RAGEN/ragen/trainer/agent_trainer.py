@@ -51,7 +51,7 @@ from verl.utils.torch_functional import masked_mean
 
 from ragen.llm_agent.agent_proxy import LLMAgentProxy
 from ragen.utils import GenerationsLogger
-from ragen.trainer.rollout_filter import build_rollout_filter
+from ragen.trainer.rollout_filter import build_rollout_filter, build_trajectory_filter
 
 from tensordict import TensorDict
 
@@ -449,6 +449,23 @@ class RayAgentTrainer(VerlRayPPOTrainer):
             metric=rollout_metric,
             compute_log_prob=self.actor_rollout_wg.compute_log_prob,
         )
+        trajectory_filter_cfg = getattr(rollout_cfg, "trajectory_filter", None)
+        if trajectory_filter_cfg is None:
+            self.trajectory_filter = build_trajectory_filter(
+                enable=False,
+                ratio=1.0,
+                score_type="adv_abs",
+                mode="topk",
+                alpha=1.0,
+            )
+        else:
+            self.trajectory_filter = build_trajectory_filter(
+                enable=trajectory_filter_cfg.enable,
+                ratio=trajectory_filter_cfg.ratio,
+                score_type=trajectory_filter_cfg.score_type,
+                mode=trajectory_filter_cfg.mode,
+                alpha=trajectory_filter_cfg.alpha,
+            )
 
 
     def _save_checkpoint(self):
@@ -579,24 +596,8 @@ class RayAgentTrainer(VerlRayPPOTrainer):
                 with marked_timer("gen", timing_raw):
                     batch = self.agent_proxy.rollout(batch, val=False)
 
-                    # Filter first, then adjust batch size
+                    # Apply optional pre-advantage group filter.
                     batch, metrics = self.rollout_filter.filter(batch)
-
-                    # Adjust batch size to be divisible by num_groups, ppo_mini_batch_size, and n_gpus
-                    num_groups = self.config.es_manager.train.env_groups
-                    ppo_mini_batch_size = self.config.actor_rollout_ref.actor.ppo_mini_batch_size
-                    n_gpus = self.config.trainer.n_gpus_per_node
-                    size_divisor = np.lcm.reduce([num_groups, ppo_mini_batch_size, n_gpus])
-                    adjust_mode = getattr(self.config.agent_proxy, "batch_adjust_mode", "copy")
-                    batch = adjust_batch(batch, size_divisor, mode=adjust_mode)
-
-                    # Record batch and mini-batch statistics
-                    batch_size = batch.batch["input_ids"].shape[0]
-                    num_mini_batches = batch_size // ppo_mini_batch_size
-                    metrics.update({
-                        "train/batch_size": batch_size,
-                        "train/num_mini_batches": num_mini_batches,
-                    })
                     metrics.update({"train/" + key: value for key, value in batch.meta_info["metrics"].items()})
 
                     inputs, outputs, scores = _process_batch_for_logging(batch)
@@ -725,6 +726,26 @@ class RayAgentTrainer(VerlRayPPOTrainer):
                         high_level_gamma=self.config.algorithm.high_level_gamma,
                         bi_level_gae=self.config.algorithm.bi_level_gae,
                     )
+
+                with marked_timer("traj_filter", timing_raw):
+                    batch, traj_filter_metrics = self.trajectory_filter.filter(batch)
+                    metrics.update(traj_filter_metrics)
+
+                # Adjust batch size to be divisible by num_groups, ppo_mini_batch_size, and n_gpus
+                num_groups = self.config.es_manager.train.env_groups
+                ppo_mini_batch_size = self.config.actor_rollout_ref.actor.ppo_mini_batch_size
+                n_gpus = self.config.trainer.n_gpus_per_node
+                size_divisor = np.lcm.reduce([num_groups, ppo_mini_batch_size, n_gpus])
+                adjust_mode = getattr(self.config.agent_proxy, "batch_adjust_mode", "copy")
+                batch = adjust_batch(batch, size_divisor, mode=adjust_mode)
+
+                # Record batch and mini-batch statistics after all resampling steps.
+                batch_size = batch.batch["input_ids"].shape[0]
+                num_mini_batches = batch_size // ppo_mini_batch_size
+                metrics.update({
+                    "train/batch_size": batch_size,
+                    "train/num_mini_batches": num_mini_batches,
+                })
 
                 ##### A very different setting, just here for testing: Can I normalize the advantages to have a mean of 0?
                 if self.config.algorithm.adv_estimator == AdvantageEstimator.GRPO and self.config.grpo_advantage_length_weight:

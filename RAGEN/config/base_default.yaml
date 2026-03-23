@@ -55,6 +55,12 @@ actor_rollout_ref:
     rollout_filter_ratio: 0.25
     rollout_filter_type: largest # smallest or largest
     rollout_filter_metric: reward_variance
+    trajectory_filter:
+      enable: false
+      ratio: 1.0
+      score_type: adv_abs # adv_abs | adv_abs_x_length
+      mode: topk # topk | sample
+      alpha: 1.0 # sampling sharpness used by sample mode
     enforce_eager: True #  for small models, set both enforce_eager and free_cache_engine to False to make rollout faster
     free_cache_engine: True
     val_kwargs:

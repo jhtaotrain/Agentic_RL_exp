@@ -22,6 +22,17 @@ class RolloutFilterConfig:
     metric: str = "reward_variance"
 
 
+@dataclass
+class TrajectoryFilterConfig:
+    """Configuration container for post-advantage trajectory resampling."""
+
+    enable: bool = False
+    ratio: float = 1.0
+    score_type: str = "adv_abs"
+    mode: str = "topk"
+    alpha: float = 1.0
+
+
 class RolloutFilter:
     """Base class for rollout filters."""
 
@@ -108,6 +119,24 @@ class RolloutFilter:
             }
         )
         return metrics
+
+
+class NullRolloutFilter(RolloutFilter):
+    """No-op rollout filter used when filtering is disabled."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            RolloutFilterConfig(
+                ratio=1.0,
+                filter_type="largest",
+                group_size=1,
+                num_groups=1,
+                metric="reward_variance",
+            )
+        )
+
+    def filter(self, batch: DataProto) -> Tuple[DataProto, Dict[str, torch.Tensor]]:
+        return batch, {}
 
 
 class RewardRolloutFilter(RolloutFilter):
@@ -352,6 +381,154 @@ class EntropyRolloutFilter(RolloutFilter):
         return batch, metrics
 
 
+class TrajectoryRolloutFilter:
+    """Resamples trajectories after advantages have been computed."""
+
+    _SCORE_OPTIONS = {"adv_abs", "adv_abs_x_length"}
+    _MODE_OPTIONS = {"topk", "sample"}
+
+    def __init__(self, config: TrajectoryFilterConfig) -> None:
+        self.config = config
+        if config.score_type not in self._SCORE_OPTIONS:
+            raise ValueError(
+                f"TrajectoryRolloutFilter only supports score types {self._SCORE_OPTIONS}, got {config.score_type}"
+            )
+        if config.mode not in self._MODE_OPTIONS:
+            raise ValueError(
+                f"TrajectoryRolloutFilter only supports modes {self._MODE_OPTIONS}, got {config.mode}"
+            )
+
+    @property
+    def enable(self) -> bool:
+        return self.config.enable
+
+    @property
+    def ratio(self) -> float:
+        return self.config.ratio
+
+    def filter(self, batch: DataProto) -> Tuple[DataProto, Dict[str, torch.Tensor]]:
+        if not self.enable or self.ratio >= 1:
+            return batch, {}
+
+        if "advantages" not in batch.batch:
+            raise ValueError("TrajectoryRolloutFilter requires advantages in the batch")
+
+        mask_key = "response_mask" if "response_mask" in batch.batch else "loss_mask"
+        if mask_key not in batch.batch:
+            raise ValueError("TrajectoryRolloutFilter requires response_mask or loss_mask in the batch")
+
+        advantages = batch.batch["advantages"]
+        valid_mask = batch.batch[mask_key].to(advantages.device)
+        abs_advantages = advantages.abs() * valid_mask
+        response_lengths = valid_mask.sum(dim=-1).clamp(min=1)
+        mean_abs_adv = abs_advantages.sum(dim=-1) / response_lengths
+
+        if self.config.score_type == "adv_abs":
+            sample_scores = mean_abs_adv
+        elif self.config.score_type == "adv_abs_x_length":
+            sample_scores = mean_abs_adv * response_lengths
+        else:
+            raise ValueError(f"Unsupported trajectory score type: {self.config.score_type}")
+
+        if (
+            batch.non_tensor_batch is not None
+            and "episode_ids" in batch.non_tensor_batch
+        ):
+            selected_mask, metrics = self._filter_turn_level(batch, sample_scores, response_lengths)
+        else:
+            selected_mask, metrics = self._filter_episode_level(sample_scores, response_lengths)
+
+        batch.batch = batch.batch[selected_mask]
+        if batch.non_tensor_batch is not None:
+            np_mask = selected_mask.cpu().numpy()
+            for key, value in batch.non_tensor_batch.items():
+                if isinstance(value, np.ndarray):
+                    batch.non_tensor_batch[key] = value[np_mask]
+                else:
+                    batch.non_tensor_batch[key] = [v for v, m in zip(value, np_mask) if m]
+
+        return batch, metrics
+
+    def _select_indices(self, scores: torch.Tensor) -> torch.Tensor:
+        num_items = scores.numel()
+        keep_count = max(int(num_items * self.ratio), 1)
+        if keep_count >= num_items:
+            return torch.arange(num_items, device=scores.device)
+
+        if self.config.mode == "topk":
+            return scores.topk(keep_count).indices
+
+        weights = scores.clamp(min=1e-12).pow(self.config.alpha)
+        total = weights.sum()
+        if not torch.isfinite(total) or total <= 0:
+            weights = torch.ones_like(weights) / num_items
+        else:
+            weights = weights / total
+        return torch.multinomial(weights, keep_count, replacement=False)
+
+    def _filter_episode_level(
+        self,
+        scores: torch.Tensor,
+        response_lengths: torch.Tensor,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        selected_indices = self._select_indices(scores)
+        selected_mask = torch.zeros(scores.numel(), dtype=torch.bool, device=scores.device)
+        selected_mask[selected_indices] = True
+        metrics = self._build_metrics(scores, response_lengths, selected_indices)
+        return selected_mask.cpu(), metrics
+
+    def _filter_turn_level(
+        self,
+        batch: DataProto,
+        sample_scores: torch.Tensor,
+        response_lengths: torch.Tensor,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        episode_ids = batch.non_tensor_batch["episode_ids"]
+        unique_episode_ids = []
+        episode_to_indices = {}
+        for idx, episode_id in enumerate(episode_ids):
+            if episode_id not in episode_to_indices:
+                unique_episode_ids.append(episode_id)
+                episode_to_indices[episode_id] = []
+            episode_to_indices[episode_id].append(idx)
+
+        episode_scores = torch.zeros(len(unique_episode_ids), device=sample_scores.device)
+        episode_lengths = torch.zeros(len(unique_episode_ids), device=sample_scores.device)
+        for episode_idx, episode_id in enumerate(unique_episode_ids):
+            indices = episode_to_indices[episode_id]
+            index_tensor = torch.tensor(indices, device=sample_scores.device, dtype=torch.long)
+            episode_scores[episode_idx] = sample_scores[index_tensor].mean()
+            episode_lengths[episode_idx] = response_lengths[index_tensor].sum()
+
+        selected_episode_indices = self._select_indices(episode_scores)
+        selected_episode_ids = {unique_episode_ids[i] for i in selected_episode_indices.cpu().tolist()}
+        selected_mask = torch.tensor(
+            [episode_id in selected_episode_ids for episode_id in episode_ids],
+            dtype=torch.bool,
+        )
+        metrics = self._build_metrics(episode_scores, episode_lengths, selected_episode_indices)
+        return selected_mask, metrics
+
+    def _build_metrics(
+        self,
+        scores: torch.Tensor,
+        lengths: torch.Tensor,
+        selected_indices: torch.Tensor,
+    ) -> Dict[str, torch.Tensor]:
+        selected_scores = scores[selected_indices]
+        selected_lengths = lengths[selected_indices]
+        keep_fraction = selected_indices.numel() / max(scores.numel(), 1)
+        return {
+            "traj_filter/score_mean": scores.mean(),
+            "traj_filter/score_max": scores.max(),
+            "traj_filter/score_min": scores.min(),
+            "traj_filter/selected_score_mean": selected_scores.mean(),
+            "traj_filter/selected_score_max": selected_scores.max(),
+            "traj_filter/selected_length_mean": selected_lengths.float().mean(),
+            "traj_filter/keep_fraction": torch.tensor(keep_fraction, dtype=torch.float32, device=scores.device),
+        }
+
+
 # Backwards compatibility: preserve older class names.
 RewardVarianceRolloutFilter = RewardRolloutFilter
 EntropyVarianceRolloutFilter = EntropyRolloutFilter
@@ -379,6 +556,9 @@ def build_rollout_filter(
         metric=metric,
     )
 
+    if ratio >= 1:
+        return NullRolloutFilter()
+
     if metric in {"reward", "reward_variance"}:
         return RewardRolloutFilter(config)
     if metric in {"entropy", "entropy_variance"}:
@@ -387,3 +567,21 @@ def build_rollout_filter(
         return EntropyRolloutFilter(config, compute_log_prob=compute_log_prob)
 
     raise ValueError(f"Unsupported rollout filter metric: {metric}")
+
+
+def build_trajectory_filter(
+    enable: bool,
+    ratio: float,
+    score_type: str,
+    mode: str,
+    alpha: float = 1.0,
+) -> TrajectoryRolloutFilter:
+    return TrajectoryRolloutFilter(
+        TrajectoryFilterConfig(
+            enable=enable,
+            ratio=ratio,
+            score_type=score_type,
+            mode=mode,
+            alpha=alpha,
+        )
+    )

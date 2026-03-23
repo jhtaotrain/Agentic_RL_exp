@@ -157,6 +157,75 @@ To train:
 python train.py --config-name base
 ```
 
+### Trajectory Resampling Interface
+
+RAGEN now supports an optional post-advantage trajectory resampling stage. This stage runs **after** rewards, values, and advantages are computed, and **before** actor/critic updates. The motivation is to make trajectory selection depend on an explicit trajectory utility signal instead of only using the earlier group-level rollout filter.
+
+#### Principle
+
+The new stage treats each completed trajectory as a candidate update sample. After advantages are computed, RAGEN builds a trajectory score and resamples trajectories according to that score. This design makes it easy to study variance-aware trajectory selection while preserving the rest of the training stack.
+
+The first release includes two score functions:
+
+- `adv_abs`: masked mean of `|advantage|`
+- `adv_abs_x_length`: masked mean of `|advantage|` multiplied by response length
+
+For turn-level training modes (`single_turn` and `limited_multi_turn`), scores are first aggregated to the episode level and then all turns from selected episodes are kept together.
+
+#### Structure
+
+- Pre-advantage group filter:
+  Implemented in `ragen/trainer/rollout_filter.py` through the existing rollout filter classes. This path still supports reward- and entropy-based group filtering.
+- Post-advantage trajectory filter:
+  Implemented in `ragen/trainer/rollout_filter.py` as `TrajectoryRolloutFilter`.
+- Trainer integration:
+  `ragen/trainer/agent_trainer.py` applies the trajectory filter after `compute_advantage(...)` and before batch-size adjustment and PPO updates.
+
+#### Configuration
+
+The interface lives under `actor_rollout_ref.rollout.trajectory_filter`:
+
+```yaml
+actor_rollout_ref:
+  rollout:
+    trajectory_filter:
+      enable: true
+      ratio: 0.5
+      score_type: adv_abs_x_length   # adv_abs | adv_abs_x_length
+      mode: topk                     # topk | sample
+      alpha: 1.0
+```
+
+Field definitions:
+
+- `enable`: turn trajectory resampling on or off
+- `ratio`: fraction of trajectories (or episodes in turn-level mode) kept after resampling
+- `score_type`: trajectory utility proxy
+- `mode`:
+  - `topk`: deterministically keep the highest-scoring trajectories
+  - `sample`: sample trajectories without replacement using score-based probabilities
+- `alpha`: sharpness parameter for probability-based sampling; only used when `mode=sample`
+
+#### Example
+
+```bash
+python train.py \
+  actor_rollout_ref.rollout.trajectory_filter.enable=true \
+  actor_rollout_ref.rollout.trajectory_filter.ratio=0.5 \
+  actor_rollout_ref.rollout.trajectory_filter.score_type=adv_abs_x_length \
+  actor_rollout_ref.rollout.trajectory_filter.mode=topk
+```
+
+#### Notes
+
+- The old group-level rollout filter remains available through:
+  - `actor_rollout_ref.rollout.rollout_filter_ratio`
+  - `actor_rollout_ref.rollout.rollout_filter_type`
+  - `actor_rollout_ref.rollout.rollout_filter_metric`
+- Setting `rollout_filter_ratio=1` disables the old group filter.
+- Setting `trajectory_filter.enable=false` disables the new post-advantage trajectory filter.
+- This implementation is intentionally modular so future work can add richer trajectory scores (for example gradient-norm proxies or importance-corrected weighting) without changing the trainer structure.
+
 
 ### Parameter efficient training with LoRA
 

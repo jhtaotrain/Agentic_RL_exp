@@ -102,7 +102,7 @@ algorithm:
 
 trainer:
   project_name: ragen_latest
-  experiment_name: test__baseline_filtered_original
+  experiment_name: test_traj_filtered
   local_log_dir: "results/"
   save_freq: 5
   total_training_steps: 200

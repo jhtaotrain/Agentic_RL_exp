@@ -59,8 +59,8 @@ actor_rollout_ref:
     rollout_filter_type: largest # smallest or largest
     rollout_filter_metric: reward_variance
     trajectory_filter:
-      enable: false #true
-      ratio: 0.25
+      enable: true
+      ratio: 0.5
       score_type: adv_abs # adv_abs | adv_abs_x_length
       mode: sample # topk | sample
       alpha: 1.0 # sampling sharpness used by sample mode
@@ -102,11 +102,11 @@ algorithm:
 
 trainer:
   project_name: ragen_latest
-  experiment_name: test_baseline_filtered_continued #test_traj_filtered
+  experiment_name: traj_filtered_sample_ratio_0.5_|A| #test_baseline_filtered_continued #test_traj_filtered
   local_log_dir: "results/"
   save_freq: 5
   total_training_steps: 200
-  resume_mode: resume_path
+  resume_mode: disable # resume_path # disable
   resume_from_path: /root/autodl-tmp/jt/RAGEN/checkpoints/ragen_latest/test__baseline_filtered_original/global_step_65
   validation_steps: 1 # validation instances = validation_steps * val_env_groups * group_size
   val_before_train: True

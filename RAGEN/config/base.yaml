@@ -55,7 +55,7 @@ actor_rollout_ref:
     gpu_memory_utilization: 0.5
     max_num_batched_tokens: 8192 # set only when enable_chunked_prefill is true
     temperature: 1
-    rollout_filter_ratio: 0.5
+    rollout_filter_ratio: 0.25
     rollout_filter_type: largest # smallest or largest
     rollout_filter_metric: reward_variance
     trajectory_filter:
@@ -132,14 +132,14 @@ agent_proxy:
 es_manager:
   format_penalty: -0.1
   train:
-    env_groups: 2
+    env_groups: 8
     # under the same group, the env config and env seed are ensured to be equal
     group_size: 16
     env_configs:
       tags: ["CoordSokoban"]
       n_groups: [2] # If not set, all env names divide nums equally. Under the same group, the env config and env seed (prompt) are equal in each generation
   val:
-    env_groups: 8
+    env_groups: 32
     group_size: 16 # should be set to 1 because when val temperature is set to 0 and group size > 1, there will be repetitive prompts which leads to same trajectory.
     env_configs:
       tags: ["CoordSokoban"]

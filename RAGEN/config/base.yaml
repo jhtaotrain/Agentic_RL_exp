@@ -51,7 +51,7 @@ actor_rollout_ref:
     tensor_model_parallel_size: 1
     max_model_len: 2048
     prompt_length: 1 # useless. Just put it here
-    response_length: 128 # single-turn response length
+    response_length: 32 #128 # single-turn response length
     gpu_memory_utilization: 0.5
     max_num_batched_tokens: 8192 # set only when enable_chunked_prefill is true
     temperature: 1
@@ -64,8 +64,8 @@ actor_rollout_ref:
       score_type: adv_abs # adv_abs | adv_abs_x_length
       mode: sample # topk | sample
       alpha: 1.0 # sampling sharpness used by sample mode
-    enforce_eager: True #  for small models, set both enforce_eager and free_cache_engine to False to make rollout faster
-    free_cache_engine: True
+    enforce_eager: False #  for small models, set both enforce_eager and free_cache_engine to False to make rollout faster
+    free_cache_engine: False
     val_kwargs:
       do_sample: True
       temperature: 0.5
@@ -104,7 +104,7 @@ trainer:
   project_name: ragen_latest
   experiment_name: test_smoke
   local_log_dir: "results/"
-  save_freq: 10
+  save_freq: 5
   total_training_steps: 200
   validation_steps: 1 # validation instances = validation_steps * val_env_groups * group_size
   val_before_train: True

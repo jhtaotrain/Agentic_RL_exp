@@ -106,6 +106,8 @@ trainer:
   local_log_dir: "results/"
   save_freq: 5
   total_training_steps: 200
+  resume_mode: resume_path
+  resume_from_path: /root/autodl-tmp/jt/RAGEN/checkpoints/ragen_latest/test__baseline_filtered_original/global_step_65
   validation_steps: 1 # validation instances = validation_steps * val_env_groups * group_size
   val_before_train: True
   n_gpus_per_node: 1

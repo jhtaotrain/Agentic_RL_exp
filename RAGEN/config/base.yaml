@@ -37,6 +37,9 @@ actor_rollout_ref:
     clip_ratio_low: 0.2
     clip_ratio_high: 0.28
     grpo_advantage_length_weight: ${grpo_advantage_length_weight}
+    diagnostics:
+      log_grad_norm_stats: false
+      log_lora_grad_cosine: false
     optim:
       betas: [0.9, 0.999]
       lr: 1e-5
@@ -70,6 +73,8 @@ actor_rollout_ref:
 critic:
   ppo_mini_batch_size: ${ppo_mini_batch_size} # by default, ppo_mini_batch_size = train_batch_size / 4
   ppo_micro_batch_size_per_gpu: ${micro_batch_size_per_gpu} # following micro_batch_size_per_gpu
+  diagnostics:
+    log_grad_norm_stats: false
   model:
     path: ${model_path}
     lora_rank: ${lora.rank}

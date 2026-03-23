@@ -192,6 +192,8 @@ class DataParallelPPOCritic(BasePPOCritic):
     def update_critic(self, data: DataProto):
         # make sure we are in training mode
         self.critic_module.train()
+        diagnostics_cfg = self.config.get("diagnostics", {})
+        log_grad_norm_stats = diagnostics_cfg.get("log_grad_norm_stats", False)
         metrics = {}
 
         select_keys = ["input_ids", "responses", "response_mask", "attention_mask", "position_ids", "values", "returns"]
@@ -255,7 +257,17 @@ class DataParallelPPOCritic(BasePPOCritic):
                     append_to_dict(metrics, micro_batch_metrics)
 
                 grad_norm = self._optimizer_step()
-                mini_batch_metrics = {"critic/grad_norm": grad_norm.detach().item()}
+                mini_batch_metrics = {}
+                if log_grad_norm_stats:
+                    mini_batch_metrics["critic/grad_norm"] = grad_norm.detach().item()
                 append_to_dict(metrics, mini_batch_metrics)
+
+        grad_norm_values = metrics.get("critic/grad_norm", [])
+        if log_grad_norm_stats and grad_norm_values:
+            grad_norm_tensor = torch.tensor(grad_norm_values, dtype=torch.float32)
+            metrics["critic/grad_norm_mean"] = grad_norm_tensor.mean().item()
+            metrics["critic/grad_norm_std"] = grad_norm_tensor.std(unbiased=False).item()
+            metrics["critic/grad_norm_var"] = grad_norm_tensor.var(unbiased=False).item()
+
         self.critic_optimizer.zero_grad()
         return metrics

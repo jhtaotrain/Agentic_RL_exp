@@ -83,6 +83,36 @@ class DataParallelPPOActor(BasePPOActor):
         )
         self.device_name = get_device_name()
 
+    def _collect_lora_grad_vector(self) -> torch.Tensor | None:
+        """Collect a flattened gradient vector for trainable LoRA parameters.
+
+        The cosine-similarity diagnostic only needs a lightweight proxy for
+        gradient direction, so it restricts itself to LoRA parameters when
+        available. If no LoRA gradients are found, the method falls back to all
+        trainable gradients.
+        """
+
+        lora_grads = []
+        fallback_grads = []
+
+        for name, param in self.actor_module.named_parameters():
+            if not param.requires_grad or param.grad is None:
+                continue
+
+            grad = param.grad.detach()
+            if isinstance(grad, DTensor):
+                grad = grad.full_tensor()
+            grad = grad.reshape(-1).float()
+
+            if "lora_" in name:
+                lora_grads.append(grad)
+            fallback_grads.append(grad)
+
+        selected_grads = lora_grads if lora_grads else fallback_grads
+        if not selected_grads:
+            return None
+        return torch.cat(selected_grads)
+
     def _forward_micro_batch(
         self, micro_batch, temperature, calculate_entropy=False
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -359,6 +389,9 @@ class DataParallelPPOActor(BasePPOActor):
     def update_policy(self, data: DataProto):
         # make sure we are in training mode
         self.actor_module.train()
+        diagnostics_cfg = self.config.get("diagnostics", {})
+        log_grad_norm_stats = diagnostics_cfg.get("log_grad_norm_stats", False)
+        log_lora_grad_cosine = diagnostics_cfg.get("log_lora_grad_cosine", False)
 
         temperature = data.meta_info["temperature"]  # temperature must be in the data.meta_info to avoid silent error
 
@@ -393,6 +426,8 @@ class DataParallelPPOActor(BasePPOActor):
         on_policy = len(mini_batches) == 1 and self.config.ppo_epochs == 1
 
         metrics = {}
+        previous_lora_grad_vector = None
+        lora_grad_cosines = []
         for _ in range(self.config.ppo_epochs):
             for batch_idx, mini_batch in enumerate(mini_batches):
                 if self.config.use_dynamic_bsz:
@@ -489,7 +524,37 @@ class DataParallelPPOActor(BasePPOActor):
                     append_to_dict(metrics, micro_batch_metrics)
 
                 grad_norm = self._optimizer_step()
-                mini_batch_metrics = {"actor/grad_norm": grad_norm.detach().item()}
+                mini_batch_metrics = {}
+                if log_grad_norm_stats:
+                    mini_batch_metrics["actor/grad_norm"] = grad_norm.detach().item()
+                current_lora_grad_vector = self._collect_lora_grad_vector() if log_lora_grad_cosine else None
+                if (
+                    log_lora_grad_cosine
+                    and current_lora_grad_vector is not None
+                    and previous_lora_grad_vector is not None
+                ):
+                    cosine = torch.nn.functional.cosine_similarity(
+                        current_lora_grad_vector,
+                        previous_lora_grad_vector,
+                        dim=0,
+                        eps=1e-12,
+                    )
+                    cosine_value = cosine.detach().item()
+                    mini_batch_metrics["actor/lora_grad_cosine"] = cosine_value
+                    lora_grad_cosines.append(cosine_value)
+                previous_lora_grad_vector = current_lora_grad_vector
                 append_to_dict(metrics, mini_batch_metrics)
+
+        grad_norm_values = metrics.get("actor/grad_norm", [])
+        if log_grad_norm_stats and grad_norm_values:
+            grad_norm_tensor = torch.tensor(grad_norm_values, dtype=torch.float32)
+            metrics["actor/grad_norm_mean"] = grad_norm_tensor.mean().item()
+            metrics["actor/grad_norm_std"] = grad_norm_tensor.std(unbiased=False).item()
+            metrics["actor/grad_norm_var"] = grad_norm_tensor.var(unbiased=False).item()
+        if log_lora_grad_cosine and lora_grad_cosines:
+            lora_grad_cosine_tensor = torch.tensor(lora_grad_cosines, dtype=torch.float32)
+            metrics["actor/lora_grad_cosine_mean"] = lora_grad_cosine_tensor.mean().item()
+            metrics["actor/lora_grad_cosine_std"] = lora_grad_cosine_tensor.std(unbiased=False).item()
+
         self.actor_optimizer.zero_grad()
         return metrics

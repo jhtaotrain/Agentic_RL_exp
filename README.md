@@ -159,3 +159,40 @@ The current interface is designed to be easy to extend. Planned future direction
 - importance-weighted resampling
 - softer sampling distributions
 - trajectory-level stability or variance proxies
+
+### Gradient Logging
+
+The current code also logs gradient-norm statistics across PPO mini-batches inside each update:
+
+- `actor/grad_norm`
+- `actor/grad_norm_mean`
+- `actor/grad_norm_std`
+- `actor/grad_norm_var`
+- `critic/grad_norm`
+- `critic/grad_norm_mean`
+- `critic/grad_norm_std`
+- `critic/grad_norm_var`
+
+These are not exact gradient-estimator variance measurements. They are lightweight update-level diagnostics computed from the sequence of mini-batch gradient norms observed during actor and critic updates.
+
+The actor also logs a lightweight gradient-direction diagnostic on trainable LoRA parameters:
+
+- `actor/lora_grad_cosine`
+- `actor/lora_grad_cosine_mean`
+- `actor/lora_grad_cosine_std`
+
+This metric is computed as the cosine similarity between consecutive mini-batch gradient vectors on LoRA parameters. It is intended as a cheap proxy for directional consistency across mini-batch updates, rather than a full estimator-variance measurement.
+
+These diagnostics are disabled by default and can be enabled from config:
+
+```yaml
+actor_rollout_ref:
+  actor:
+    diagnostics:
+      log_grad_norm_stats: true
+      log_lora_grad_cosine: true
+
+critic:
+  diagnostics:
+    log_grad_norm_stats: true
+```

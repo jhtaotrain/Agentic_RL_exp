@@ -22,8 +22,9 @@ The resulting update order is:
 2. Apply the optional original group-level rollout filter
 3. Compute rewards, values, and advantages
 4. Compute a trajectory score
-5. Resample trajectories
-6. Adjust batch size and continue PPO/GRPO updates
+5. Select a trajectory subset
+6. Resample from the retained support with score-based weights back to the original trajectory count
+7. Adjust batch size and continue PPO/GRPO updates
 
 ### Implemented Scores
 
@@ -33,6 +34,13 @@ The first implementation includes two trajectory score options:
 - `adv_abs_x_length`: masked mean of `|advantage|` multiplied by response length
 
 For turn-level training modes (`single_turn` and `limited_multi_turn`), scores are aggregated to the episode level and all turns from each selected episode are kept together.
+
+After subset selection, the retained trajectories are resampled with score-based weights to restore the original trajectory count before PPO updates. This means:
+
+- the original RAGEN group-level rollout filter remains untouched
+- the trajectory filter still controls which trajectories survive
+- the update volume stays approximately fixed instead of shrinking with the keep ratio
+- the final PPO batch is redistributed toward higher-scoring retained trajectories
 
 ### Code Structure
 
@@ -66,10 +74,11 @@ Field definitions:
 
 - `enable`: enables or disables post-advantage trajectory resampling
 - `ratio`: fraction of trajectories kept after resampling
+- `ratio`: fraction of trajectories kept before uniform replication restores the original trajectory count
 - `score_type`: score function used to rank or sample trajectories
 - `mode`:
-  - `topk`: deterministically keep the highest-scoring trajectories
-  - `sample`: sample trajectories without replacement according to score-based probabilities
+  - `topk`: deterministically keep the highest-scoring trajectories before weighted fixed-volume resampling
+  - `sample`: sample trajectories without replacement according to score-based probabilities before weighted fixed-volume resampling
 - `alpha`: score sharpening parameter used only when `mode=sample`
 
 ### Relationship to the Original RAGEN Filter
@@ -81,6 +90,8 @@ The original group-level rollout filter is still available through:
 - `actor_rollout_ref.rollout.rollout_filter_metric`
 
 The new trajectory filter is independent from that mechanism.
+
+The original rollout filter still runs first and is unchanged. The trajectory filter is a second post-advantage stage layered on top of it.
 
 Practical settings:
 
@@ -159,6 +170,17 @@ The current interface is designed to be easy to extend. Planned future direction
 - importance-weighted resampling
 - softer sampling distributions
 - trajectory-level stability or variance proxies
+
+### Current Trajectory-Filter Semantics
+
+The trajectory-level filter now applies the following sequence:
+
+1. Compute a score for each trajectory or episode
+2. Keep a fraction `ratio` using `topk` or `sample`
+3. Resample from the retained support with score-based weights to recover the original trajectory count
+4. Pass the expanded batch to the existing `adjust_batch(...)` utility for divisibility repair
+
+This makes the trajectory filter a cleaner selection mechanism than relying on `adjust_batch(copy)` alone, because the full-volume PPO batch is now constructed by the trajectory filter itself rather than by random divisibility-only duplication.
 
 ### Gradient Logging
 

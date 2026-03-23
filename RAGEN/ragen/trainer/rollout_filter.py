@@ -382,7 +382,15 @@ class EntropyRolloutFilter(RolloutFilter):
 
 
 class TrajectoryRolloutFilter:
-    """Resamples trajectories after advantages have been computed."""
+    """Resamples trajectories after advantages have been computed.
+
+    The trajectory filter first selects a subset of trajectories or episodes
+    according to the configured score and selection mode. It then restores the
+    original trajectory volume by resampling from the retained support with
+    score-based weights. This keeps the original RAGEN rollout filter
+    untouched while turning the new trajectory-level stage into a fixed-volume
+    redistribution mechanism instead of a pure hard filter.
+    """
 
     _SCORE_OPTIONS = {"adv_abs", "adv_abs_x_length"}
     _MODE_OPTIONS = {"topk", "sample"}
@@ -434,20 +442,31 @@ class TrajectoryRolloutFilter:
             batch.non_tensor_batch is not None
             and "episode_ids" in batch.non_tensor_batch
         ):
-            selected_mask, metrics = self._filter_turn_level(batch, sample_scores, response_lengths)
+            selected_indices, metrics = self._filter_turn_level(
+                batch, sample_scores, response_lengths
+            )
         else:
-            selected_mask, metrics = self._filter_episode_level(sample_scores, response_lengths)
+            selected_indices, metrics = self._filter_episode_level(
+                sample_scores, response_lengths
+            )
 
-        batch.batch = batch.batch[selected_mask]
-        if batch.non_tensor_batch is not None:
-            np_mask = selected_mask.cpu().numpy()
-            for key, value in batch.non_tensor_batch.items():
-                if isinstance(value, np.ndarray):
-                    batch.non_tensor_batch[key] = value[np_mask]
-                else:
-                    batch.non_tensor_batch[key] = [v for v, m in zip(value, np_mask) if m]
+        batch = self._apply_indices(batch, selected_indices)
 
         return batch, metrics
+
+    def _apply_indices(self, batch: DataProto, indices: torch.Tensor) -> DataProto:
+        if batch.batch is not None:
+            batch.batch = batch.batch[indices]
+
+        if batch.non_tensor_batch is not None:
+            np_indices = indices.cpu().numpy()
+            for key, value in batch.non_tensor_batch.items():
+                if isinstance(value, np.ndarray):
+                    batch.non_tensor_batch[key] = value[np_indices]
+                else:
+                    batch.non_tensor_batch[key] = [value[i] for i in np_indices.tolist()]
+
+        return batch
 
     def _select_indices(self, scores: torch.Tensor) -> torch.Tensor:
         num_items = scores.numel()
@@ -472,10 +491,18 @@ class TrajectoryRolloutFilter:
         response_lengths: torch.Tensor,
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         selected_indices = self._select_indices(scores)
-        selected_mask = torch.zeros(scores.numel(), dtype=torch.bool, device=scores.device)
-        selected_mask[selected_indices] = True
-        metrics = self._build_metrics(scores, response_lengths, selected_indices)
-        return selected_mask.cpu(), metrics
+        resampled_indices = self._resample_selected_support(
+            selected_indices,
+            scores[selected_indices],
+            target_count=scores.numel(),
+        )
+        metrics = self._build_metrics(
+            scores,
+            response_lengths,
+            selected_indices,
+            resampled_count=resampled_indices.numel(),
+        )
+        return resampled_indices.cpu(), metrics
 
     def _filter_turn_level(
         self,
@@ -501,23 +528,70 @@ class TrajectoryRolloutFilter:
             episode_lengths[episode_idx] = response_lengths[index_tensor].sum()
 
         selected_episode_indices = self._select_indices(episode_scores)
-        selected_episode_ids = {unique_episode_ids[i] for i in selected_episode_indices.cpu().tolist()}
-        selected_mask = torch.tensor(
-            [episode_id in selected_episode_ids for episode_id in episode_ids],
-            dtype=torch.bool,
+        resampled_episode_indices = self._resample_selected_support(
+            selected_episode_indices,
+            episode_scores[selected_episode_indices],
+            target_count=len(unique_episode_ids),
         )
-        metrics = self._build_metrics(episode_scores, episode_lengths, selected_episode_indices)
-        return selected_mask, metrics
+
+        expanded_sample_indices = []
+        for episode_idx in resampled_episode_indices.cpu().tolist():
+            episode_id = unique_episode_ids[episode_idx]
+            expanded_sample_indices.extend(episode_to_indices[episode_id])
+
+        expanded_sample_indices = torch.tensor(expanded_sample_indices, dtype=torch.long)
+        metrics = self._build_metrics(
+            episode_scores,
+            episode_lengths,
+            selected_episode_indices,
+            resampled_count=resampled_episode_indices.numel(),
+        )
+        return expanded_sample_indices, metrics
+
+    def _resample_selected_support(
+        self,
+        selected_indices: torch.Tensor,
+        selected_scores: torch.Tensor,
+        target_count: int,
+    ) -> torch.Tensor:
+        """Resample a fixed-volume batch from the retained support."""
+        if selected_indices.numel() == 0:
+            raise ValueError("TrajectoryRolloutFilter cannot resample an empty selection")
+
+        selected_indices = selected_indices.to(dtype=torch.long)
+        if selected_indices.numel() >= target_count:
+            return selected_indices[:target_count]
+
+        weights = selected_scores.clamp(min=1e-12).pow(self.config.alpha)
+        total = weights.sum()
+        if not torch.isfinite(total) or total <= 0:
+            weights = torch.ones_like(weights) / selected_indices.numel()
+        else:
+            weights = weights / total
+
+        sampled_positions = torch.multinomial(
+            weights,
+            num_samples=target_count,
+            replacement=True,
+        )
+        expanded_indices = selected_indices[sampled_positions]
+        if expanded_indices.numel() != target_count:
+            raise ValueError(
+                f"Resampled trajectory count mismatch: {expanded_indices.numel()} != {target_count}"
+            )
+        return expanded_indices
 
     def _build_metrics(
         self,
         scores: torch.Tensor,
         lengths: torch.Tensor,
         selected_indices: torch.Tensor,
+        resampled_count: int,
     ) -> Dict[str, torch.Tensor]:
         selected_scores = scores[selected_indices]
         selected_lengths = lengths[selected_indices]
         keep_fraction = selected_indices.numel() / max(scores.numel(), 1)
+        expansion_factor = resampled_count / max(selected_indices.numel(), 1)
         return {
             "traj_filter/score_mean": scores.mean(),
             "traj_filter/score_max": scores.max(),
@@ -526,6 +600,8 @@ class TrajectoryRolloutFilter:
             "traj_filter/selected_score_max": selected_scores.max(),
             "traj_filter/selected_length_mean": selected_lengths.float().mean(),
             "traj_filter/keep_fraction": torch.tensor(keep_fraction, dtype=torch.float32, device=scores.device),
+            "traj_filter/resampled_count": torch.tensor(float(resampled_count), dtype=torch.float32, device=scores.device),
+            "traj_filter/expansion_factor": torch.tensor(expansion_factor, dtype=torch.float32, device=scores.device),
         }
 
 

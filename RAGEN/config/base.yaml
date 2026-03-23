@@ -59,8 +59,8 @@ actor_rollout_ref:
     rollout_filter_type: largest # smallest or largest
     rollout_filter_metric: reward_variance
     trajectory_filter:
-      enable: false
-      ratio: 1.0
+      enable: true
+      ratio: 0.25
       score_type: adv_abs # adv_abs | adv_abs_x_length
       mode: sample # topk | sample
       alpha: 1.0 # sampling sharpness used by sample mode

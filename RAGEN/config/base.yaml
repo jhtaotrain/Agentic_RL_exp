@@ -64,8 +64,8 @@ actor_rollout_ref:
       score_type: adv_abs_x_length # adv_abs | adv_abs_x_length
       mode: sample # topk | sample
       alpha: 1.0 # sampling sharpness used by sample mode
-    enforce_eager: False #  for small models, set both enforce_eager and free_cache_engine to False to make rollout faster
-    free_cache_engine: False
+    enforce_eager: True #  for small models, set both enforce_eager and free_cache_engine to False to make rollout faster
+    free_cache_engine: True
     val_kwargs:
       do_sample: True
       temperature: 0.5

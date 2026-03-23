@@ -55,11 +55,11 @@ actor_rollout_ref:
     gpu_memory_utilization: 0.5
     max_num_batched_tokens: 8192 # set only when enable_chunked_prefill is true
     temperature: 1
-    rollout_filter_ratio: 1
+    rollout_filter_ratio: 0.5
     rollout_filter_type: largest # smallest or largest
     rollout_filter_metric: reward_variance
     trajectory_filter:
-      enable: true
+      enable: false
       ratio: 1.0
       score_type: adv_abs # adv_abs | adv_abs_x_length
       mode: sample # topk | sample
@@ -102,14 +102,14 @@ algorithm:
 
 trainer:
   project_name: ragen_latest
-  experiment_name: test_smoke
+  experiment_name: test_smoke_faster_baseline_filtered
   local_log_dir: "results/"
   save_freq: 5
   total_training_steps: 200
   validation_steps: 1 # validation instances = validation_steps * val_env_groups * group_size
   val_before_train: True
   n_gpus_per_node: 2
-  test_freq: 10
+  test_freq: 5
   generations_to_log_to_wandb: 
     val: 20
   logger: [ 'console', 'swanlab' ]

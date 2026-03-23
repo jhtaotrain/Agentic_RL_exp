@@ -60,8 +60,8 @@ actor_rollout_ref:
     rollout_filter_metric: reward_variance
     trajectory_filter:
       enable: true
-      ratio: 0.5
-      score_type: adv_abs # adv_abs | adv_abs_x_length
+      ratio: 0.25
+      score_type: adv_abs_x_length # adv_abs | adv_abs_x_length
       mode: sample # topk | sample
       alpha: 1.0 # sampling sharpness used by sample mode
     enforce_eager: False #  for small models, set both enforce_eager and free_cache_engine to False to make rollout faster
@@ -102,7 +102,7 @@ algorithm:
 
 trainer:
   project_name: ragen_latest
-  experiment_name: traj_filtered_sample_ratio_0.5_|A| #test_baseline_filtered_continued #test_traj_filtered
+  experiment_name: traj_filtered_sample_ratio_0.25_|A*length| #test_baseline_filtered_continued #test_traj_filtered
   local_log_dir: "results/"
   save_freq: 5
   total_training_steps: 200

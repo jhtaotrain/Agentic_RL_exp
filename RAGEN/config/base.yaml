@@ -3,7 +3,7 @@ defaults:
   - envs
 
 system:
-  CUDA_VISIBLE_DEVICES: "0"
+  CUDA_VISIBLE_DEVICES: "0,1"
 
 seed:
   train: 10000
@@ -59,13 +59,13 @@ actor_rollout_ref:
     rollout_filter_type: largest # smallest or largest
     rollout_filter_metric: reward_variance
     trajectory_filter:
-      enable: true
-      ratio: 0.25
-      score_type: adv_abs_x_length # adv_abs | adv_abs_x_length
-      mode: sample # topk | sample
+      enable: false
+      ratio: 1.0
+      score_type: adv_abs # adv_abs | adv_abs_x_length
+      mode: topk # topk | sample
       alpha: 1.0 # sampling sharpness used by sample mode
-    enforce_eager: True #  for small models, set both enforce_eager and free_cache_engine to False to make rollout faster
-    free_cache_engine: True
+    enforce_eager: False #  for small models, set both enforce_eager and free_cache_engine to False to make rollout faster
+    free_cache_engine: False
     val_kwargs:
       do_sample: True
       temperature: 0.5
@@ -102,21 +102,21 @@ algorithm:
 
 trainer:
   project_name: ragen_latest
-  experiment_name: traj_filtered_sample_ratio_0.25_|A*length| #test_baseline_filtered_continued #test_traj_filtered
+  experiment_name: test__baseline_filtered_original_continued
   local_log_dir: "results/"
   save_freq: 5
   total_training_steps: 200
-  resume_mode: disable # resume_path # disable
+  resume_mode: resume_path
   resume_from_path: /root/autodl-tmp/jt/RAGEN/checkpoints/ragen_latest/test__baseline_filtered_original/global_step_65
   validation_steps: 1 # validation instances = validation_steps * val_env_groups * group_size
   val_before_train: True
-  n_gpus_per_node: 1
+  n_gpus_per_node: 2
   test_freq: 5
   generations_to_log_to_wandb: 
     val: 20
   logger: [ 'console', 'swanlab' ]
-  max_actor_ckpt_to_keep: 3
-  max_critic_ckpt_to_keep: 3
+  max_actor_ckpt_to_keep: 1
+  max_critic_ckpt_to_keep: 1
 
 agent_proxy:
   context_window_mode: "full" # "full" | "limited_multi_turn" | "single_turn"

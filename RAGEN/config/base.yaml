@@ -106,7 +106,7 @@ trainer:
   local_log_dir: "results/"
   save_freq: 5
   total_training_steps: 200
-  resume_mode: disable
+  resume_mode: auto
   resume_from_path: null
   validation_steps: 1 # validation instances = validation_steps * val_env_groups * group_size
   val_before_train: True

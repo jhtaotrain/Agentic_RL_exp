@@ -3,7 +3,7 @@ defaults:
   - envs
 
 system:
-  CUDA_VISIBLE_DEVICES: "0,1"
+  CUDA_VISIBLE_DEVICES: "0"
 
 seed:
   train: 10000
@@ -55,14 +55,14 @@ actor_rollout_ref:
     gpu_memory_utilization: 0.5
     max_num_batched_tokens: 8192 # set only when enable_chunked_prefill is true
     temperature: 1
-    rollout_filter_ratio: 0.25
+    rollout_filter_ratio: 1 #0.25
     rollout_filter_type: largest # smallest or largest
     rollout_filter_metric: reward_variance
     trajectory_filter:
-      enable: false
-      ratio: 1.0
+      enable: true
+      ratio: 0.25
       score_type: adv_abs # adv_abs | adv_abs_x_length
-      mode: topk # topk | sample
+      mode: sample # topk | sample
       alpha: 1.0 # sampling sharpness used by sample mode
     enforce_eager: False #  for small models, set both enforce_eager and free_cache_engine to False to make rollout faster
     free_cache_engine: False
@@ -102,15 +102,15 @@ algorithm:
 
 trainer:
   project_name: ragen_latest
-  experiment_name: test__baseline_filtered_original_continued
+  experiment_name: traj_sample_|A|_0.25_no_rollout_filter
   local_log_dir: "results/"
   save_freq: 5
   total_training_steps: 200
-  resume_mode: resume_path
-  resume_from_path: /root/autodl-tmp/jt/RAGEN/checkpoints/ragen_latest/test__baseline_filtered_original/global_step_65
+  resume_mode: disable
+  resume_from_path: null
   validation_steps: 1 # validation instances = validation_steps * val_env_groups * group_size
   val_before_train: True
-  n_gpus_per_node: 2
+  n_gpus_per_node: 1
   test_freq: 5
   generations_to_log_to_wandb: 
     val: 20

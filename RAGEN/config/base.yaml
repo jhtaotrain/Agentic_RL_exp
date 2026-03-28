@@ -60,7 +60,7 @@ actor_rollout_ref:
     rollout_filter_metric: reward_variance
     trajectory_filter:
       enable: true
-      ratio: 0.125
+      ratio: 0.25
       score_type: adv_abs_x_length # adv_abs | adv_abs_x_length
       mode: sample # topk | sample
       alpha: 1.0 # sampling sharpness used by sample mode
@@ -101,8 +101,8 @@ algorithm:
     kl_coef: 0.000
 
 trainer:
-  project_name: ragen_latest
-  experiment_name: traj_sample_|A*length|_0.125_rollout_filter_0.25
+  project_name: ragen_mechanism
+  experiment_name: traj_sample_|A*length|_0.25_rollout_filter_0.25
   local_log_dir: "results/"
   save_freq: 5
   total_training_steps: 200

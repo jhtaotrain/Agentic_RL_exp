@@ -59,9 +59,9 @@ actor_rollout_ref:
     rollout_filter_type: largest # smallest or largest
     rollout_filter_metric: reward_variance
     trajectory_filter:
-      enable: false #true
+      enable: true
       ratio: 0.25
-      score_type: adv_abs_x_length # adv_abs | adv_abs_x_length
+      score_type: adv_abs # adv_abs | adv_abs_x_length
       mode: sample # topk | sample
       alpha: 1.0 # sampling sharpness used by sample mode
     enforce_eager: False #  for small models, set both enforce_eager and free_cache_engine to False to make rollout faster
@@ -102,7 +102,7 @@ algorithm:
 
 trainer:
   project_name: ragen_mechanism
-  experiment_name: baseline #traj_sample_|A*length|_0.25_rollout_filter_0.25
+  experiment_name: traj_sample_|A|_0.25_rollout_filter_0.25
   local_log_dir: "results/"
   save_freq: 5
   total_training_steps: 200

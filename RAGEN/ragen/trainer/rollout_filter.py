@@ -427,9 +427,16 @@ class TrajectoryRolloutFilter:
 
         advantages = batch.batch["advantages"]
         valid_mask = batch.batch[mask_key].to(advantages.device)
+        signed_advantages = advantages * valid_mask
         abs_advantages = advantages.abs() * valid_mask
         response_lengths = valid_mask.sum(dim=-1).clamp(min=1)
+        mean_signed_adv = signed_advantages.sum(dim=-1) / response_lengths
         mean_abs_adv = abs_advantages.sum(dim=-1) / response_lengths
+        sample_rewards = None
+        if "token_level_scores" in batch.batch:
+            sample_rewards = (batch.batch["token_level_scores"] * valid_mask).sum(dim=-1)
+        elif "token_level_rewards" in batch.batch:
+            sample_rewards = (batch.batch["token_level_rewards"] * valid_mask).sum(dim=-1)
 
         if self.config.score_type == "adv_abs":
             sample_scores = mean_abs_adv
@@ -443,11 +450,11 @@ class TrajectoryRolloutFilter:
             and "episode_ids" in batch.non_tensor_batch
         ):
             selected_indices, metrics = self._filter_turn_level(
-                batch, sample_scores, response_lengths
+                batch, sample_scores, response_lengths, mean_signed_adv, sample_rewards
             )
         else:
             selected_indices, metrics = self._filter_episode_level(
-                sample_scores, response_lengths
+                sample_scores, response_lengths, mean_signed_adv, sample_rewards
             )
 
         batch = self._apply_indices(batch, selected_indices)
@@ -489,6 +496,8 @@ class TrajectoryRolloutFilter:
         self,
         scores: torch.Tensor,
         response_lengths: torch.Tensor,
+        signed_mean_adv: torch.Tensor,
+        sample_rewards: Optional[torch.Tensor],
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         selected_indices = self._select_indices(scores)
         resampled_indices = self._resample_selected_support(
@@ -499,7 +508,10 @@ class TrajectoryRolloutFilter:
         metrics = self._build_metrics(
             scores,
             response_lengths,
+            signed_mean_adv,
+            sample_rewards,
             selected_indices,
+            resampled_indices,
             resampled_count=resampled_indices.numel(),
         )
         return resampled_indices.cpu(), metrics
@@ -509,6 +521,8 @@ class TrajectoryRolloutFilter:
         batch: DataProto,
         sample_scores: torch.Tensor,
         response_lengths: torch.Tensor,
+        signed_mean_adv: torch.Tensor,
+        sample_rewards: Optional[torch.Tensor],
     ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
         episode_ids = batch.non_tensor_batch["episode_ids"]
         unique_episode_ids = []
@@ -521,11 +535,18 @@ class TrajectoryRolloutFilter:
 
         episode_scores = torch.zeros(len(unique_episode_ids), device=sample_scores.device)
         episode_lengths = torch.zeros(len(unique_episode_ids), device=sample_scores.device)
+        episode_signed_mean_adv = torch.zeros(len(unique_episode_ids), device=sample_scores.device)
+        episode_rewards = None
+        if sample_rewards is not None:
+            episode_rewards = torch.zeros(len(unique_episode_ids), device=sample_scores.device)
         for episode_idx, episode_id in enumerate(unique_episode_ids):
             indices = episode_to_indices[episode_id]
             index_tensor = torch.tensor(indices, device=sample_scores.device, dtype=torch.long)
             episode_scores[episode_idx] = sample_scores[index_tensor].mean()
             episode_lengths[episode_idx] = response_lengths[index_tensor].sum()
+            episode_signed_mean_adv[episode_idx] = signed_mean_adv[index_tensor].mean()
+            if episode_rewards is not None:
+                episode_rewards[episode_idx] = sample_rewards[index_tensor].mean()
 
         selected_episode_indices = self._select_indices(episode_scores)
         resampled_episode_indices = self._resample_selected_support(
@@ -543,7 +564,10 @@ class TrajectoryRolloutFilter:
         metrics = self._build_metrics(
             episode_scores,
             episode_lengths,
+            episode_signed_mean_adv,
+            episode_rewards,
             selected_episode_indices,
+            resampled_episode_indices,
             resampled_count=resampled_episode_indices.numel(),
         )
         return expanded_sample_indices, metrics
@@ -585,24 +609,52 @@ class TrajectoryRolloutFilter:
         self,
         scores: torch.Tensor,
         lengths: torch.Tensor,
+        signed_mean_adv: torch.Tensor,
+        rewards: Optional[torch.Tensor],
         selected_indices: torch.Tensor,
+        resampled_indices: torch.Tensor,
         resampled_count: int,
     ) -> Dict[str, torch.Tensor]:
         selected_scores = scores[selected_indices]
         selected_lengths = lengths[selected_indices]
+        selected_signed_adv = signed_mean_adv[selected_indices]
         keep_fraction = selected_indices.numel() / max(scores.numel(), 1)
         expansion_factor = resampled_count / max(selected_indices.numel(), 1)
-        return {
+        metrics = {
             "traj_filter/score_mean": scores.mean(),
             "traj_filter/score_max": scores.max(),
             "traj_filter/score_min": scores.min(),
             "traj_filter/selected_score_mean": selected_scores.mean(),
             "traj_filter/selected_score_max": selected_scores.max(),
             "traj_filter/selected_length_mean": selected_lengths.float().mean(),
+            "traj_filter/selected_pos_adv_frac": (selected_signed_adv > 0).float().mean(),
+            "traj_filter/selected_neg_adv_frac": (selected_signed_adv < 0).float().mean(),
+            "traj_filter/selected_pos_adv_mean": selected_signed_adv[selected_signed_adv > 0].mean()
+            if (selected_signed_adv > 0).any()
+            else torch.tensor(0.0, dtype=torch.float32, device=scores.device),
+            "traj_filter/selected_neg_adv_mean": selected_signed_adv[selected_signed_adv < 0].mean()
+            if (selected_signed_adv < 0).any()
+            else torch.tensor(0.0, dtype=torch.float32, device=scores.device),
             "traj_filter/keep_fraction": torch.tensor(keep_fraction, dtype=torch.float32, device=scores.device),
             "traj_filter/resampled_count": torch.tensor(float(resampled_count), dtype=torch.float32, device=scores.device),
             "traj_filter/expansion_factor": torch.tensor(expansion_factor, dtype=torch.float32, device=scores.device),
         }
+        if rewards is not None:
+            selected_rewards = rewards[selected_indices]
+            metrics["traj_filter/selected_reward_mean"] = selected_rewards.mean()
+            metrics["traj_filter/selected_reward_std"] = selected_rewards.std() if selected_rewards.numel() > 1 else torch.tensor(0.0, dtype=torch.float32, device=scores.device)
+
+        if resampled_indices.numel() > 0:
+            unique_count = torch.unique(resampled_indices).numel()
+            metrics["traj_filter/unique_selected_frac"] = torch.tensor(
+                unique_count / max(resampled_indices.numel(), 1),
+                dtype=torch.float32,
+                device=scores.device,
+            )
+            sample_counts = torch.bincount(resampled_indices.to(dtype=torch.long), minlength=scores.numel())
+            metrics["traj_filter/max_resample_count"] = sample_counts.max().to(dtype=torch.float32)
+
+        return metrics
 
 
 # Backwards compatibility: preserve older class names.

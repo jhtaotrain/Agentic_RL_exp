@@ -6,8 +6,8 @@ system:
   CUDA_VISIBLE_DEVICES: "0"
 
 seed:
-  train: 10000
-  val: 123
+  train: 10001
+  val: 124
 
 micro_batch_size_per_gpu: 1
 ppo_mini_batch_size: 8

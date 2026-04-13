@@ -11,7 +11,7 @@ seed:
 
 micro_batch_size_per_gpu: 1
 ppo_mini_batch_size: 8
-model_path: /root/models/Qwen2.5-0.5B-Instruct
+model_path: Qwen/Qwen2.5-0.5B-Instruct
 enable_response_mask: True # Enabling response mask could improve stability of rollout/old_log_prob, as P(st|history) are no longer calculated in loss here. See https://docs.google.com/document/d/1bg7obeiKTExuHHBl5uOiSpec5uLDZ2Tgvxy6li5pHX4/edit?usp=sharing for more details.
 grpo_advantage_length_weight: False # if you do not enable this and critic/advantage_estimator is GRPO, and the critic/advantages/mean is too low, then you can try enabling this to encourage reasoning and forbid collapse
 
@@ -59,7 +59,7 @@ actor_rollout_ref:
     rollout_filter_type: largest # smallest or largest
     rollout_filter_metric: reward_variance
     trajectory_filter:
-      enable: true
+      enable: false
       ratio: 0.25
       score_type: adv_abs # adv_abs | adv_abs_x_length
       mode: sample # topk | sample
@@ -101,10 +101,10 @@ algorithm:
     kl_coef: 0.000
 
 trainer:
-  project_name: ragen_mechanism
-  experiment_name: traj_sample_|A|_0.25_rollout_filter_0.25
+  project_name: ragen_mechanism2
+  experiment_name: traj_base_rollout_filter_0.25
   local_log_dir: "results/"
-  save_freq: 5
+  save_freq: 15
   total_training_steps: 200
   resume_mode: disable
   resume_from_path: null

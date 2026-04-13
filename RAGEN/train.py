@@ -299,4 +299,9 @@ class TaskRunner:
 
 
 if __name__ == '__main__':
+    import sys
+    sys.argv.extend([
+        "--config-dir", os.path.join(os.path.dirname(__file__), "ragen/config"),
+        "--config-dir", os.path.join(os.path.dirname(__file__), "verl/verl/trainer/config"),
+    ])
     main()

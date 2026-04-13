@@ -1,11 +1,6 @@
 defaults:
   - ppo_trainer # this is a symbolic link to the verl/verl/trainer/config/ppo_trainer.yaml file
   - envs
-  - _self_
-
-hydra:
-  searchpath:
-    - file://${hydra:runtime.cwd}/verl/verl/trainer/config
 
 system:
   CUDA_VISIBLE_DEVICES: "0"

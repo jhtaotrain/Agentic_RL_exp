@@ -11,11 +11,11 @@ system:
   CUDA_VISIBLE_DEVICES: "0,1"
 
 seed:
-  train: 10001
+  train: 100012 #10001
   val: 124
 
-micro_batch_size_per_gpu: 1
-ppo_mini_batch_size: 8
+micro_batch_size_per_gpu: 6
+ppo_mini_batch_size: 12
 model_path: Qwen/Qwen2.5-0.5B-Instruct
 enable_response_mask: True # Enabling response mask could improve stability of rollout/old_log_prob, as P(st|history) are no longer calculated in loss here. See https://docs.google.com/document/d/1bg7obeiKTExuHHBl5uOiSpec5uLDZ2Tgvxy6li5pHX4/edit?usp=sharing for more details.
 grpo_advantage_length_weight: False # if you do not enable this and critic/advantage_estimator is GRPO, and the critic/advantages/mean is too low, then you can try enabling this to encourage reasoning and forbid collapse
@@ -109,7 +109,8 @@ trainer:
   project_name: ragen_mechanism2
   experiment_name: traj_base_rollout_filter_0.25
   local_log_dir: "results/"
-  save_freq: 15
+  default_local_dir: /mnt/local/checkpoints/${trainer.project_name}/${trainer.experiment_name}
+  save_freq: 300
   total_training_steps: 200
   resume_mode: disable
   resume_from_path: null

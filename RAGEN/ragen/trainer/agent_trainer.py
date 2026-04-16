@@ -457,6 +457,7 @@ class RayAgentTrainer(VerlRayPPOTrainer):
                 score_type="adv_abs",
                 mode="topk",
                 alpha=1.0,
+                unit="episode",
             )
         else:
             self.trajectory_filter = build_trajectory_filter(
@@ -465,6 +466,7 @@ class RayAgentTrainer(VerlRayPPOTrainer):
                 score_type=trajectory_filter_cfg.score_type,
                 mode=trajectory_filter_cfg.mode,
                 alpha=trajectory_filter_cfg.alpha,
+                unit=getattr(trajectory_filter_cfg, "unit", "episode"),
             )
 
 
@@ -637,6 +639,16 @@ class RayAgentTrainer(VerlRayPPOTrainer):
 
                 # batch.batch["response_mask"] = compute_response_mask(batch)
                 batch.batch["response_mask"] = batch.batch["loss_mask"]
+                # Turn-level modes can produce an arbitrary number of rows, but distributed
+                # worker-group RPCs require equal chunks before we reach the later PPO
+                # divisibility repair. Make the batch divisible by the DP world size here.
+                pre_rpc_divisor = self.actor_rollout_wg.world_size
+                pre_rpc_adjust_mode = getattr(self.config.agent_proxy, "batch_adjust_mode", "copy")
+                pre_rpc_batch_size = batch.batch["input_ids"].shape[0]
+                if pre_rpc_batch_size % pre_rpc_divisor != 0:
+                    batch = adjust_batch(batch, pre_rpc_divisor, mode=pre_rpc_adjust_mode)
+                    metrics["train/pre_rpc_adjusted_batch_size"] = batch.batch["input_ids"].shape[0]
+                    metrics["train/pre_rpc_adjust_delta"] = batch.batch["input_ids"].shape[0] - pre_rpc_batch_size
                 # balance the number of valid tokens on each dp rank.
                 # Note that this breaks the order of data inside the batch.
                 # Please take care when you implement group based adv computation such as GRPO and rloo

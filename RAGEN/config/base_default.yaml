@@ -66,9 +66,10 @@ actor_rollout_ref:
     trajectory_filter:
       enable: false
       ratio: 1.0
-      score_type: adv_abs # adv_abs | adv_abs_x_length
+      score_type: adv_abs # adv_abs | adv_abs_x_length | adv_abs_div_sqrt_len | adv_signed_pos | adv_std
       mode: topk # topk | sample
       alpha: 1.0 # sampling sharpness used by sample mode
+      unit: episode # episode | sample
     enforce_eager: True #  for small models, set both enforce_eager and free_cache_engine to False to make rollout faster
     free_cache_engine: True
     val_kwargs:

@@ -16,7 +16,7 @@ seed:
 
 micro_batch_size_per_gpu: 6
 ppo_mini_batch_size: 12
-model_path: Qwen/Qwen2.5-0.5B-Instruct
+model_path: /home/ubuntu/models/Qwen2.5-0.5B-Instruct #Qwen/Qwen2.5-0.5B-Instruct
 enable_response_mask: True # Enabling response mask could improve stability of rollout/old_log_prob, as P(st|history) are no longer calculated in loss here. See https://docs.google.com/document/d/1bg7obeiKTExuHHBl5uOiSpec5uLDZ2Tgvxy6li5pHX4/edit?usp=sharing for more details.
 grpo_advantage_length_weight: False # if you do not enable this and critic/advantage_estimator is GRPO, and the critic/advantages/mean is too low, then you can try enabling this to encourage reasoning and forbid collapse
 
@@ -66,9 +66,10 @@ actor_rollout_ref:
     trajectory_filter:
       enable: false
       ratio: 0.25
-      score_type: adv_abs # adv_abs | adv_abs_x_length
+      score_type: adv_abs # adv_abs | adv_abs_x_length | adv_abs_div_sqrt_len | adv_signed_pos | adv_std
       mode: sample # topk | sample
       alpha: 1.0 # sampling sharpness used by sample mode
+      unit: episode # episode | sample
     enforce_eager: False #  for small models, set both enforce_eager and free_cache_engine to False to make rollout faster
     free_cache_engine: False
     val_kwargs:

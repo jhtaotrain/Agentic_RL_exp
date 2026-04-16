@@ -31,6 +31,7 @@ class TrajectoryFilterConfig:
     score_type: str = "adv_abs"
     mode: str = "topk"
     alpha: float = 1.0
+    unit: str = "episode"
 
 
 class RolloutFilter:
@@ -392,8 +393,15 @@ class TrajectoryRolloutFilter:
     redistribution mechanism instead of a pure hard filter.
     """
 
-    _SCORE_OPTIONS = {"adv_abs", "adv_abs_x_length"}
+    _SCORE_OPTIONS = {
+        "adv_abs",
+        "adv_abs_x_length",
+        "adv_abs_div_sqrt_len",
+        "adv_signed_pos",
+        "adv_std",
+    }
     _MODE_OPTIONS = {"topk", "sample"}
+    _UNIT_OPTIONS = {"episode", "sample"}
 
     def __init__(self, config: TrajectoryFilterConfig) -> None:
         self.config = config
@@ -405,6 +413,10 @@ class TrajectoryRolloutFilter:
             raise ValueError(
                 f"TrajectoryRolloutFilter only supports modes {self._MODE_OPTIONS}, got {config.mode}"
             )
+        if config.unit not in self._UNIT_OPTIONS:
+            raise ValueError(
+                f"TrajectoryRolloutFilter only supports units {self._UNIT_OPTIONS}, got {config.unit}"
+            )
 
     @property
     def enable(self) -> bool:
@@ -413,6 +425,10 @@ class TrajectoryRolloutFilter:
     @property
     def ratio(self) -> float:
         return self.config.ratio
+
+    @property
+    def unit(self) -> str:
+        return self.config.unit
 
     def filter(self, batch: DataProto) -> Tuple[DataProto, Dict[str, torch.Tensor]]:
         if not self.enable or self.ratio >= 1:
@@ -432,6 +448,11 @@ class TrajectoryRolloutFilter:
         response_lengths = valid_mask.sum(dim=-1).clamp(min=1)
         mean_signed_adv = signed_advantages.sum(dim=-1) / response_lengths
         mean_abs_adv = abs_advantages.sum(dim=-1) / response_lengths
+        centered_advantages = (advantages * valid_mask) - mean_signed_adv.unsqueeze(-1) * valid_mask
+        adv_var = (centered_advantages.pow(2).sum(dim=-1) / response_lengths).clamp(min=0.0)
+        std_adv = adv_var.sqrt()
+        positive_advantages = advantages.clamp(min=0.0) * valid_mask
+        mean_positive_adv = positive_advantages.sum(dim=-1) / response_lengths
         sample_rewards = None
         if "token_level_scores" in batch.batch:
             sample_rewards = (batch.batch["token_level_scores"] * valid_mask).sum(dim=-1)
@@ -442,13 +463,21 @@ class TrajectoryRolloutFilter:
             sample_scores = mean_abs_adv
         elif self.config.score_type == "adv_abs_x_length":
             sample_scores = mean_abs_adv * response_lengths
+        elif self.config.score_type == "adv_abs_div_sqrt_len":
+            sample_scores = mean_abs_adv * response_lengths.sqrt()
+        elif self.config.score_type == "adv_signed_pos":
+            sample_scores = mean_positive_adv
+        elif self.config.score_type == "adv_std":
+            sample_scores = std_adv
         else:
             raise ValueError(f"Unsupported trajectory score type: {self.config.score_type}")
 
-        if (
+        has_episode_ids = (
             batch.non_tensor_batch is not None
             and "episode_ids" in batch.non_tensor_batch
-        ):
+        )
+
+        if has_episode_ids and self.unit == "episode":
             selected_indices, metrics = self._filter_turn_level(
                 batch, sample_scores, response_lengths, mean_signed_adv, sample_rewards
             )
@@ -621,6 +650,11 @@ class TrajectoryRolloutFilter:
         keep_fraction = selected_indices.numel() / max(scores.numel(), 1)
         expansion_factor = resampled_count / max(selected_indices.numel(), 1)
         metrics = {
+            "traj_filter/unit_is_sample": torch.tensor(
+                1.0 if self.unit == "sample" else 0.0,
+                dtype=torch.float32,
+                device=scores.device,
+            ),
             "traj_filter/score_mean": scores.mean(),
             "traj_filter/score_max": scores.max(),
             "traj_filter/score_min": scores.min(),
@@ -703,6 +737,7 @@ def build_trajectory_filter(
     score_type: str,
     mode: str,
     alpha: float = 1.0,
+    unit: str = "episode",
 ) -> TrajectoryRolloutFilter:
     return TrajectoryRolloutFilter(
         TrajectoryFilterConfig(
@@ -711,5 +746,6 @@ def build_trajectory_filter(
             score_type=score_type,
             mode=mode,
             alpha=alpha,
+            unit=unit,
         )
     )

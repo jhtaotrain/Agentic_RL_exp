@@ -15,9 +15,11 @@
 
 set -u  # undefined vars are errors; do NOT use -e so one failure doesn't abort the queue
 
-PROJECT_NAME="ragen_mechanism3"
+PROJECT_NAME="ragen_mechanism5"
 LOG_DIR="logs/$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$LOG_DIR"
+COMMON_OVERRIDES="agent_proxy.context_window_mode=full actor_rollout_ref.rollout.trajectory_filter.unit=episode seed.train=24681357 seed.val=97531"
+COMMON_OVERRIDES="${COMMON_OVERRIDES} trainer.total_training_steps=150"
 
 # ---------------------------------------------------------------------------
 # Define experiments here.
@@ -35,30 +37,65 @@ EXPERIMENTS=(
   # "exp_b|actor_rollout_ref.rollout.rollout_filter_ratio=0.5  trainer.total_training_steps=200"
   # "exp_c|algorithm.adv_estimator=grpo actor_rollout_ref.actor.use_kl_loss=True"
 
-#   "traj_base_rollout_filter_0.25|\
-# actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
-# actor_rollout_ref.rollout.trajectory_filter.enable=False \
-# "
+  "base_rollout_filter_0.25|\
+${COMMON_OVERRIDES} \
+actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
+actor_rollout_ref.rollout.trajectory_filter.enable=False \
+"
 
-#   "traj_base_rollout_filter_0.25_traj_0.25_A_sample_1|\
+  "rollout_0.25_traj_0.25_A_sample_1|\
+${COMMON_OVERRIDES} \
+actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
+actor_rollout_ref.rollout.trajectory_filter.enable=True \
+actor_rollout_ref.rollout.trajectory_filter.ratio=0.25 \
+actor_rollout_ref.rollout.trajectory_filter.score_type=adv_abs \
+actor_rollout_ref.rollout.trajectory_filter.mode=sample \
+actor_rollout_ref.rollout.trajectory_filter.alpha=1.0 \
+"
+
+
+  "rollout_0.25_traj_0.25_ASL_sample_1|\
+${COMMON_OVERRIDES} \
+actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
+actor_rollout_ref.rollout.trajectory_filter.enable=True \
+actor_rollout_ref.rollout.trajectory_filter.ratio=0.25 \
+actor_rollout_ref.rollout.trajectory_filter.score_type=adv_abs_div_sqrt_len \
+actor_rollout_ref.rollout.trajectory_filter.mode=sample \
+actor_rollout_ref.rollout.trajectory_filter.alpha=1.0 \
+"
+
+  "rollout_0.25_traj_0.25_AP_sample_1|\
+${COMMON_OVERRIDES} \
+actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
+actor_rollout_ref.rollout.trajectory_filter.enable=True \
+actor_rollout_ref.rollout.trajectory_filter.ratio=0.25 \
+actor_rollout_ref.rollout.trajectory_filter.score_type=adv_signed_pos \
+actor_rollout_ref.rollout.trajectory_filter.mode=sample \
+actor_rollout_ref.rollout.trajectory_filter.alpha=1.0 \
+"
+
+#   "rollout_0.25_traj_0.25_ASTD_sample_1|\
+# ${COMMON_OVERRIDES} \
 # actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
 # actor_rollout_ref.rollout.trajectory_filter.enable=True \
 # actor_rollout_ref.rollout.trajectory_filter.ratio=0.25 \
-# actor_rollout_ref.rollout.trajectory_filter.score_type=adv_abs \
+# actor_rollout_ref.rollout.trajectory_filter.score_type=adv_std \
 # actor_rollout_ref.rollout.trajectory_filter.mode=sample \
 # actor_rollout_ref.rollout.trajectory_filter.alpha=1.0 \
 # "
 
-#   "traj_base_rollout_filter_0.25_traj_0.5_A_sample_1|\
-# actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
-# actor_rollout_ref.rollout.trajectory_filter.enable=True \
-# actor_rollout_ref.rollout.trajectory_filter.ratio=0.5 \
-# actor_rollout_ref.rollout.trajectory_filter.score_type=adv_abs \
-# actor_rollout_ref.rollout.trajectory_filter.mode=sample \
-# actor_rollout_ref.rollout.trajectory_filter.alpha=1.0 \
-# "
+  "rollout_0.25_traj_0.5_A_sample_1|\
+${COMMON_OVERRIDES} \
+actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
+actor_rollout_ref.rollout.trajectory_filter.enable=True \
+actor_rollout_ref.rollout.trajectory_filter.ratio=0.5 \
+actor_rollout_ref.rollout.trajectory_filter.score_type=adv_abs \
+actor_rollout_ref.rollout.trajectory_filter.mode=sample \
+actor_rollout_ref.rollout.trajectory_filter.alpha=1.0 \
+"
 
-#   "traj_base_rollout_filter_0.25_traj_0.25_A_topk_1|\
+#   "rollout_0.25_traj_0.25_A_topk_1|\
+# ${COMMON_OVERRIDES} \
 # actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
 # actor_rollout_ref.rollout.trajectory_filter.enable=True \
 # actor_rollout_ref.rollout.trajectory_filter.ratio=0.25 \
@@ -67,7 +104,8 @@ EXPERIMENTS=(
 # actor_rollout_ref.rollout.trajectory_filter.alpha=1.0 \
 # "
 
-  "traj_base_rollout_filter_0.25_traj_0.25_A_sample_2|\
+  "rollout_0.25_traj_0.25_A_sample_2|\
+${COMMON_OVERRIDES} \
 actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
 actor_rollout_ref.rollout.trajectory_filter.enable=True \
 actor_rollout_ref.rollout.trajectory_filter.ratio=0.25 \
@@ -76,7 +114,8 @@ actor_rollout_ref.rollout.trajectory_filter.mode=sample \
 actor_rollout_ref.rollout.trajectory_filter.alpha=2.0 \
 "
 
-  "traj_base_rollout_filter_0.25_traj_0.25_AL_sample_1|\
+  "rollout_0.25_traj_0.25_AL_sample_1|\
+${COMMON_OVERRIDES} \
 actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
 actor_rollout_ref.rollout.trajectory_filter.enable=True \
 actor_rollout_ref.rollout.trajectory_filter.ratio=0.25 \
@@ -85,32 +124,36 @@ actor_rollout_ref.rollout.trajectory_filter.mode=sample \
 actor_rollout_ref.rollout.trajectory_filter.alpha=1.0 \
 "
 
-  "traj_base_rollout_filter_0.25_traj_0.5_AL_sample_1|\
-actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
-actor_rollout_ref.rollout.trajectory_filter.enable=True \
-actor_rollout_ref.rollout.trajectory_filter.ratio=0.5 \
-actor_rollout_ref.rollout.trajectory_filter.score_type=adv_abs_x_length \
-actor_rollout_ref.rollout.trajectory_filter.mode=sample \
-actor_rollout_ref.rollout.trajectory_filter.alpha=1.0 \
-"
+#   "rollout_0.25_traj_0.5_AL_sample_1|\
+# ${COMMON_OVERRIDES} \
+# actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
+# actor_rollout_ref.rollout.trajectory_filter.enable=True \
+# actor_rollout_ref.rollout.trajectory_filter.ratio=0.5 \
+# actor_rollout_ref.rollout.trajectory_filter.score_type=adv_abs_x_length \
+# actor_rollout_ref.rollout.trajectory_filter.mode=sample \
+# actor_rollout_ref.rollout.trajectory_filter.alpha=1.0 \
+# "
 
-  "traj_base_rollout_filter_0.25_traj_0.25_AL_topk_1|\
-actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
-actor_rollout_ref.rollout.trajectory_filter.enable=True \
-actor_rollout_ref.rollout.trajectory_filter.ratio=0.25 \
-actor_rollout_ref.rollout.trajectory_filter.score_type=adv_abs_x_length \
-actor_rollout_ref.rollout.trajectory_filter.mode=topk \
-actor_rollout_ref.rollout.trajectory_filter.alpha=1.0 \
-"
+#   "rollout_0.25_traj_0.25_AL_topk_1|\
+# ${COMMON_OVERRIDES} \
+# actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
+# actor_rollout_ref.rollout.trajectory_filter.enable=True \
+# actor_rollout_ref.rollout.trajectory_filter.ratio=0.25 \
+# actor_rollout_ref.rollout.trajectory_filter.score_type=adv_abs_x_length \
+# actor_rollout_ref.rollout.trajectory_filter.mode=topk \
+# actor_rollout_ref.rollout.trajectory_filter.alpha=1.0 \
+# "
 
-  "traj_base_rollout_filter_0.25_traj_0.25_AL_sample_2|\
-actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
-actor_rollout_ref.rollout.trajectory_filter.enable=True \
-actor_rollout_ref.rollout.trajectory_filter.ratio=0.25 \
-actor_rollout_ref.rollout.trajectory_filter.score_type=adv_abs_x_length \
-actor_rollout_ref.rollout.trajectory_filter.mode=sample \
-actor_rollout_ref.rollout.trajectory_filter.alpha=2.0 \
-"
+#   "rollout_0.25_traj_0.25_AL_sample_2|\
+# ${COMMON_OVERRIDES} \
+# actor_rollout_ref.rollout.rollout_filter_ratio=0.25 \
+# actor_rollout_ref.rollout.trajectory_filter.enable=True \
+# actor_rollout_ref.rollout.trajectory_filter.ratio=0.25 \
+# actor_rollout_ref.rollout.trajectory_filter.score_type=adv_abs_x_length \
+# actor_rollout_ref.rollout.trajectory_filter.mode=sample \
+# actor_rollout_ref.rollout.trajectory_filter.alpha=2.0 \
+# "
+
 )
 
 run_one() {
